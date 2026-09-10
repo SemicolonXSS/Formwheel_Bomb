@@ -73,87 +73,159 @@ input{
 </div>
 
 <script type="module">
-/*
-  Firebase 설정을 본인의 Firebase 프로젝트 설정으로 교체하세요.
-  Firebase Console → 프로젝트 설정 → 내 앱 → 웹 앱에서 확인할 수 있습니다.
-*/
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
 import {
-  getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, runTransaction
-} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+  getDatabase, ref, get, set, update, onValue, runTransaction
+} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-database.js";
 
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.firebasestorage.app",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyBreTSe1m0-xlbF4aupnU5isRZCihR25IE",
+  authDomain: "formwheel.firebaseapp.com",
+  databaseURL: "https://formwheel-default-rtdb.firebaseio.com",
+  projectId: "formwheel",
+  storageBucket: "formwheel.firebasestorage.app",
+  messagingSenderId: "431583088241",
+  appId: "1:431583088241:web:74e0e34ea1e3e1170c55d0",
+  measurementId: "G-T372YXDF8D"
 };
 
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+const db = getDatabase(app);
 
 let roomId = "";
 let myId = localStorage.getItem("bombPlayerId") || crypto.randomUUID();
 localStorage.setItem("bombPlayerId", myId);
-let unsubscribe = null;
 let lastState = null;
 let timerInterval = null;
+let unsubscribe = null;
 
 const $ = id => document.getElementById(id);
 
 function getName(){
   const n = $("name").value.trim();
-  if(!n){ alert("닉네임을 입력해주세요."); return null; }
+  if(!n){
+    alert("닉네임을 입력해주세요.");
+    return null;
+  }
   return n;
 }
 
 function randomDuration(){
-  // 0 = 30~40초, 1 = 1분~1분10초
-  return Math.random() < .5
-    ? 30000 + Math.floor(Math.random()*10001)
-    : 60000 + Math.floor(Math.random()*10001);
+  return Math.random() < 0.5
+    ? 30000 + Math.floor(Math.random() * 10001)
+    : 60000 + Math.floor(Math.random() * 10001);
+}
+
+function makeRoomCode(){
+  return Math.random().toString(36).slice(2,8).toUpperCase();
+}
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, m => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+  }[m]));
 }
 
 window.createRoom = async () => {
-  const name = getName(); if(!name) return;
-  roomId = Math.random().toString(36).slice(2,8).toUpperCase();
+  const name = getName();
+  if(!name) return;
 
-  const player = {id:myId,name,alive:true};
-  const duration = randomDuration();
+  try{
+    $("status") && ($("status").textContent = "방 만드는 중...");
+    let code = makeRoomCode();
+    let roomRef = ref(db, "bombRooms/" + code);
+    let snap = await get(roomRef);
 
-  await setDoc(doc(db,"bombRooms",roomId),{
-    status:"waiting",
-    players:[player],
-    bombHolder:myId,
-    startedAt:null,
-    duration,
-    winner:null,
-    createdAt:Date.now()
-  });
+    while(snap.exists()){
+      code = makeRoomCode();
+      roomRef = ref(db, "bombRooms/" + code);
+      snap = await get(roomRef);
+    }
 
-  enterGame();
-  listenRoom();
+    roomId = code;
+
+    const player = {
+      id: myId,
+      name: name,
+      alive: true
+    };
+
+    await set(roomRef, {
+      status: "waiting",
+      players: {
+        [myId]: player
+      },
+      bombHolder: myId,
+      startedAt: 0,
+      duration: randomDuration(),
+      winner: null,
+      createdAt: Date.now()
+    });
+
+    enterGame();
+    listenRoom();
+  }catch(e){
+    console.error(e);
+    alert("방 만들기에 실패했습니다.\nFirebase Realtime Database 규칙과 설정을 확인해주세요.");
+  }
 };
 
 window.joinRoom = async () => {
-  const name = getName(); if(!name) return;
-  roomId = $("roomInput").value.trim().toUpperCase();
-  if(!roomId){ alert("방 코드를 입력해주세요."); return; }
+  const name = getName();
+  if(!name) return;
 
-  const ref = doc(db,"bombRooms",roomId);
-  const snap = await getDoc(ref);
-  if(!snap.exists()){ alert("방을 찾을 수 없습니다."); return; }
+  const code = $("roomInput").value.trim().toUpperCase();
+  if(!code){
+    alert("방 코드를 입력해주세요.");
+    return;
+  }
 
-  const data = snap.data();
-  if(data.status !== "waiting"){ alert("이미 시작된 방입니다."); return; }
-  if(data.players.length >= 10){ alert("최대 10명까지 참가할 수 있습니다."); return; }
+  try{
+    const roomRef = ref(db, "bombRooms/" + code);
+    const snap = await get(roomRef);
 
-  const players = [...data.players,{id:myId,name,alive:true}];
-  await updateDoc(ref,{players});
-  enterGame();
-  listenRoom();
+    if(!snap.exists()){
+      alert("방을 찾을 수 없습니다.");
+      return;
+    }
+
+    const data = snap.val();
+
+    if(data.status !== "waiting"){
+      alert("이미 시작된 방입니다.");
+      return;
+    }
+
+    const players = data.players || {};
+    if(Object.keys(players).length >= 10){
+      alert("최대 10명까지 참가할 수 있습니다.");
+      return;
+    }
+
+    if(players[myId]){
+      alert("이미 참가한 방입니다.");
+      roomId = code;
+      enterGame();
+      listenRoom();
+      return;
+    }
+
+    await update(roomRef, {
+      ["players/" + myId]: {
+        id: myId,
+        name: name,
+        alive: true
+      }
+    });
+
+    roomId = code;
+    enterGame();
+    listenRoom();
+
+  }catch(e){
+    console.error(e);
+    alert("방 참가에 실패했습니다.\nFirebase Realtime Database 규칙과 설정을 확인해주세요.");
+  }
 };
 
 function enterGame(){
@@ -164,32 +236,57 @@ function enterGame(){
 
 function listenRoom(){
   if(unsubscribe) unsubscribe();
-  unsubscribe = onSnapshot(doc(db,"bombRooms",roomId), snap=>{
-    if(!snap.exists()) return;
-    lastState = snap.data();
+
+  const roomRef = ref(db, "bombRooms/" + roomId);
+
+  unsubscribe = onValue(roomRef, snap => {
+    if(!snap.exists()){
+      alert("방이 삭제되었습니다.");
+      location.reload();
+      return;
+    }
+
+    lastState = normalizeState(snap.val());
     render();
+  }, error => {
+    console.error(error);
+    alert("게임 데이터를 불러오지 못했습니다.");
   });
+}
+
+function normalizeState(data){
+  const playersObject = data.players || {};
+  return {
+    ...data,
+    players: Object.values(playersObject)
+  };
 }
 
 function render(){
   const s = lastState;
+  if(!s) return;
+
   $("players").innerHTML = s.players.map(p =>
-    `<li>${p.id===s.bombHolder ? "💣 " : ""}${escapeHtml(p.name)} ${p.id===myId ? "<b>(나)</b>" : ""}${!p.alive ? " 💀" : ""}</li>`
+    `<li>${p.id === s.bombHolder ? "💣 " : ""}${escapeHtml(p.name)}
+     ${p.id === myId ? "<b>(나)</b>" : ""}
+     ${!p.alive ? " 💀" : ""}</li>`
   ).join("");
 
   const mine = s.bombHolder === myId && s.status === "playing";
   $("passBtn").disabled = !mine;
 
   if(s.status === "waiting"){
+    $("timer").textContent = "--";
     $("status").textContent = s.players.length < 2
       ? "친구를 기다리는 중..."
-      : "게임을 시작하려면 호스트가 필요합니다.";
-    $("timer").textContent = "--";
+      : "게임 시작!";
     return;
   }
 
   if(s.status === "playing"){
-    $("status").textContent = mine ? "🔥 내 차례! 폭탄을 넘겨!" : "상대방이 폭탄을 가지고 있어요.";
+    $("status").textContent = mine
+      ? "🔥 내 차례! 폭탄을 넘겨!"
+      : "상대방이 폭탄을 가지고 있어요.";
     startTimer();
     return;
   }
@@ -205,85 +302,125 @@ function render(){
 
 function startTimer(){
   clearInterval(timerInterval);
-  const update = async () => {
-    if(!lastState || lastState.status!=="playing") return;
-    const left = Math.max(0, lastState.startedAt + lastState.duration - Date.now());
-    $("timer").textContent = Math.ceil(left/1000);
+
+  const updateTimer = async () => {
+    if(!lastState || lastState.status !== "playing") return;
+
+    const left = Math.max(
+      0,
+      Number(lastState.startedAt) + Number(lastState.duration) - Date.now()
+    );
+
+    $("timer").textContent = Math.ceil(left / 1000);
 
     if(left <= 0){
       clearInterval(timerInterval);
       await explode();
     }
   };
-  update();
-  timerInterval = setInterval(update,200);
+
+  updateTimer();
+  timerInterval = setInterval(updateTimer, 200);
 }
 
 window.passBomb = async () => {
-  const ref = doc(db,"bombRooms",roomId);
+  if(!roomId) return;
+
   try{
-    await runTransaction(db, async tx=>{
-      const snap = await tx.get(ref);
-      if(!snap.exists()) throw new Error("방 없음");
-      const s = snap.data();
-      if(s.status!=="playing" || s.bombHolder!==myId) throw new Error("차례 아님");
+    const roomRef = ref(db, "bombRooms/" + roomId);
 
-      const alive = s.players.filter(p=>p.alive);
-      const idx = alive.findIndex(p=>p.id===myId);
-      const next = alive[(idx+1)%alive.length];
+    await runTransaction(roomRef, current => {
+      if(!current) return current;
 
-      tx.update(ref,{
-        bombHolder:next.id,
-        startedAt:Date.now()
-      });
+      if(current.status !== "playing") return;
+      if(current.bombHolder !== myId) return;
+
+      const players = Object.values(current.players || {})
+        .filter(p => p.alive);
+
+      if(players.length <= 1) return current;
+
+      const index = players.findIndex(p => p.id === myId);
+      const next = players[(index + 1) % players.length];
+
+      current.bombHolder = next.id;
+      current.startedAt = Date.now();
+
+      return current;
     });
-  }catch(e){ console.log(e); }
+  }catch(e){
+    console.error(e);
+  }
 };
 
 async function explode(){
-  const ref = doc(db,"bombRooms",roomId);
+  if(!roomId || !lastState || lastState.status !== "playing") return;
+
   try{
-    await runTransaction(db, async tx=>{
-      const snap = await tx.get(ref);
-      if(!snap.exists()) return;
-      const s = snap.data();
-      if(s.status!=="playing") return;
+    const roomRef = ref(db, "bombRooms/" + roomId);
 
-      const loser = s.players.find(p=>p.id===s.bombHolder);
-      const players = s.players.map(p=>p.id===s.bombHolder ? {...p,alive:false}:p);
-      const alive = players.filter(p=>p.alive);
+    await runTransaction(roomRef, current => {
+      if(!current || current.status !== "playing") return current;
 
-      tx.update(ref,{
-        players,
-        status: alive.length <= 1 ? "finished" : "playing",
-        winner: alive.length <= 1 ? (alive[0]?.name || "없음") : null,
-        bombHolder: alive.length > 1 ? alive[Math.floor(Math.random()*alive.length)].id : null,
-        startedAt: alive.length > 1 ? Date.now() : null
-      });
+      const holder = current.bombHolder;
+      const players = current.players || {};
+
+      if(!players[holder]) return current;
+
+      players[holder].alive = false;
+
+      const alive = Object.values(players).filter(p => p.alive);
+
+      if(alive.length <= 1){
+        current.status = "finished";
+        current.winner = alive.length === 1 ? alive[0].name : null;
+        current.bombHolder = null;
+        current.startedAt = 0;
+      }else{
+        const next = alive[Math.floor(Math.random() * alive.length)];
+        current.status = "playing";
+        current.bombHolder = next.id;
+        current.startedAt = Date.now();
+      }
+
+      current.players = players;
+      return current;
     });
-  }catch(e){ console.log(e); }
-}
-
-function escapeHtml(str){
-  return String(str).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
-}
-
-// 2명 이상이 되면 자동으로 시작
-setInterval(async()=>{
-  if(!roomId || !lastState) return;
-  if(lastState.status==="waiting" && lastState.players.length>=2){
-    const ref=doc(db,"bombRooms",roomId);
-    try{
-      await runTransaction(db,async tx=>{
-        const snap=await tx.get(ref);
-        if(!snap.exists()) return;
-        const s=snap.data();
-        if(s.status!=="waiting" || s.players.length<2) return;
-        tx.update(ref,{status:"playing",startedAt:Date.now(),bombHolder:s.players[0].id});
-      });
-    }catch(e){}
+  }catch(e){
+    console.error(e);
   }
-},1000);
+}
+
+// 참가자가 2명 이상이면 자동 시작
+setInterval(async () => {
+  if(!roomId || !lastState) return;
+  if(lastState.status !== "waiting") return;
+
+  const players = lastState.players.filter(p => p.alive);
+
+  if(players.length >= 2){
+    try{
+      const roomRef = ref(db, "bombRooms/" + roomId);
+
+      await runTransaction(roomRef, current => {
+        if(!current || current.status !== "waiting") return current;
+
+        const currentPlayers = Object.values(current.players || {})
+          .filter(p => p.alive);
+
+        if(currentPlayers.length < 2) return current;
+
+        current.status = "playing";
+        current.startedAt = Date.now();
+        current.bombHolder = currentPlayers[0].id;
+
+        return current;
+      });
+    }catch(e){
+      console.error(e);
+    }
+  }
+}, 1000);
 </script>
 </body>
 </html>
