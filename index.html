@@ -153,6 +153,7 @@ window.createRoom = async () => {
 
     await set(roomRef, {
       status: "waiting",
+      hostId: myId,
       players: {
         [myId]: player
       },
@@ -277,11 +278,11 @@ function render(){
   $("passBtn").disabled = !mine;
 
   if(s.status === "waiting"){
+    clearInterval(timerInterval);
     $("timer").textContent = "";
 
     // The first player is the host.
-    const hostId = s.players.length ? s.players[0].id : null;
-    const isHost = hostId === myId;
+    const isHost = s.hostId === myId;
 
     $("startBtn").classList.toggle("hidden", !isHost);
     $("startBtn").disabled = s.players.length < 2;
@@ -339,29 +340,50 @@ function startTimer(){
 window.startGame = async () => {
   if(!roomId || !lastState) return;
 
+  const players = lastState.players.filter(p => p.alive);
+
+  if(lastState.hostId !== myId){
+    alert("호스트만 게임을 시작할 수 있습니다.");
+    return;
+  }
+
+  if(players.length < 2){
+    alert("최소 2명이 참가해야 게임을 시작할 수 있습니다.");
+    return;
+  }
+
   try{
     const roomRef = ref(db, "bombRooms/" + roomId);
 
-    await runTransaction(roomRef, current => {
-      if(!current || current.status !== "waiting") return current;
+    // 현재 대기 상태인지 한 번 더 확인한 뒤 시작합니다.
+    const snap = await get(roomRef);
+    if(!snap.exists()) return;
 
-      const players = Object.values(current.players || {})
-        .filter(p => p.alive);
+    const current = snap.val();
+    if(current.status !== "waiting") return;
 
-      if(players.length < 2) return current;
+    const currentPlayers = Object.values(current.players || {})
+      .filter(p => p.alive);
 
-      // The first player in the room is the host.
-      if(players[0].id !== myId) return current;
+    if(currentPlayers.length < 2){
+      alert("최소 2명이 참가해야 게임을 시작할 수 있습니다.");
+      return;
+    }
 
-      current.status = "playing";
-      current.startedAt = Date.now();
-      current.bombHolder = players[0].id;
+    if(current.hostId !== myId){
+      alert("호스트만 게임을 시작할 수 있습니다.");
+      return;
+    }
 
-      return current;
+    await update(roomRef, {
+      status: "playing",
+      startedAt: Date.now(),
+      bombHolder: currentPlayers[0].id
     });
+
   }catch(e){
     console.error(e);
-    alert("게임 시작에 실패했습니다.");
+    alert("게임 시작에 실패했습니다.\nFirebase Realtime Database 규칙을 확인해주세요.");
   }
 };
 
