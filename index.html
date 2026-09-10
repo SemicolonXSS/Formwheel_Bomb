@@ -25,7 +25,7 @@ body{
 }
 .bomb:before{content:"";position:absolute;top:-16px;right:38px;width:30px;height:25px;background:#222;border-radius:8px}
 .bomb:after{content:"";position:absolute;top:-32px;right:51px;width:8px;height:25px;background:#ff8a00;border-radius:8px;box-shadow:0 0 14px #ff5a00}
-.timer{font-size:52px;font-weight:900;letter-spacing:2px}
+.timer{display:none}
 .status{font-size:18px;font-weight:700;margin:10px 0 24px}
 button{
   width:100%;border:0;border-radius:16px;padding:16px;font-size:17px;font-weight:800;
@@ -63,9 +63,10 @@ input{
   </div>
 
   <div id="game" class="card hidden">
-    <div class="small">방 코드: <b id="roomCode"></b></div>
-    <div class="bomb"><div class="timer" id="timer">--</div></div>
+    <div class="room-code">방 코드: <b id="roomCode"></b></div>
+    <div class="bomb"></div>
     <div class="status" id="status">게임 준비 중...</div>
+    <button id="startBtn" class="primary hidden" onclick="startGame()">게임 시작</button>
     <button id="passBtn" class="primary" onclick="passBomb()">💣 폭탄 넘기기</button>
     <ul id="players" class="players"></ul>
     <div class="info">내 차례일 때만 폭탄을 넘길 수 있어요.<br>시간이 0이 되면 폭탄을 가진 플레이어가 탈락합니다.</div>
@@ -276,14 +277,25 @@ function render(){
   $("passBtn").disabled = !mine;
 
   if(s.status === "waiting"){
-    $("timer").textContent = "--";
+    $("timer").textContent = "";
+
+    // The first player is the host.
+    const hostId = s.players.length ? s.players[0].id : null;
+    const isHost = hostId === myId;
+
+    $("startBtn").classList.toggle("hidden", !isHost);
+    $("startBtn").disabled = s.players.length < 2;
+
     $("status").textContent = s.players.length < 2
-      ? "친구를 기다리는 중..."
-      : "게임 시작!";
+      ? (isHost ? "친구를 기다리는 중..." : "호스트가 게임을 시작하기를 기다리는 중...")
+      : (isHost ? "준비 완료! 게임을 시작하세요." : "호스트가 게임을 시작하기를 기다리는 중...");
+
+    $("passBtn").disabled = true;
     return;
   }
 
   if(s.status === "playing"){
+    $("startBtn").classList.add("hidden");
     $("status").textContent = mine
       ? "🔥 내 차례! 폭탄을 넘겨!"
       : "상대방이 폭탄을 가지고 있어요.";
@@ -292,11 +304,12 @@ function render(){
   }
 
   if(s.status === "finished"){
+    $("startBtn").classList.add("hidden");
     $("status").textContent = s.winner
       ? `🏆 ${escapeHtml(s.winner)} 승리!`
       : "게임 종료";
     $("passBtn").disabled = true;
-    $("timer").textContent = "💥";
+    $("timer").textContent = "";
   }
 }
 
@@ -311,7 +324,7 @@ function startTimer(){
       Number(lastState.startedAt) + Number(lastState.duration) - Date.now()
     );
 
-    $("timer").textContent = Math.ceil(left / 1000);
+    $("timer").textContent = "";
 
     if(left <= 0){
       clearInterval(timerInterval);
@@ -322,6 +335,35 @@ function startTimer(){
   updateTimer();
   timerInterval = setInterval(updateTimer, 200);
 }
+
+window.startGame = async () => {
+  if(!roomId || !lastState) return;
+
+  try{
+    const roomRef = ref(db, "bombRooms/" + roomId);
+
+    await runTransaction(roomRef, current => {
+      if(!current || current.status !== "waiting") return current;
+
+      const players = Object.values(current.players || {})
+        .filter(p => p.alive);
+
+      if(players.length < 2) return current;
+
+      // The first player in the room is the host.
+      if(players[0].id !== myId) return current;
+
+      current.status = "playing";
+      current.startedAt = Date.now();
+      current.bombHolder = players[0].id;
+
+      return current;
+    });
+  }catch(e){
+    console.error(e);
+    alert("게임 시작에 실패했습니다.");
+  }
+};
 
 window.passBomb = async () => {
   if(!roomId) return;
@@ -391,36 +433,6 @@ async function explode(){
   }
 }
 
-// 참가자가 2명 이상이면 자동 시작
-setInterval(async () => {
-  if(!roomId || !lastState) return;
-  if(lastState.status !== "waiting") return;
-
-  const players = lastState.players.filter(p => p.alive);
-
-  if(players.length >= 2){
-    try{
-      const roomRef = ref(db, "bombRooms/" + roomId);
-
-      await runTransaction(roomRef, current => {
-        if(!current || current.status !== "waiting") return current;
-
-        const currentPlayers = Object.values(current.players || {})
-          .filter(p => p.alive);
-
-        if(currentPlayers.length < 2) return current;
-
-        current.status = "playing";
-        current.startedAt = Date.now();
-        current.bombHolder = currentPlayers[0].id;
-
-        return current;
-      });
-    }catch(e){
-      console.error(e);
-    }
-  }
-}, 1000);
 </script>
 </body>
 </html>
