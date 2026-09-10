@@ -268,9 +268,9 @@ function render(){
   if(!s) return;
 
   $("players").innerHTML = s.players.map(p =>
-    `<li>${p.id === s.bombHolder ? "💣 " : ""}${escapeHtml(p.name)}
+    `<li>${p.id === s.bombHolder ? "💣💣💣 " : ""}${escapeHtml(p.name)}
      ${p.id === myId ? "<b>(나)</b>" : ""}
-     ${!p.alive ? " 💀" : ""}</li>`
+     ${!p.alive ? " 💀Lost💀" : ""}</li>`
   ).join("");
 
   const mine = s.bombHolder === myId && s.status === "playing";
@@ -296,8 +296,8 @@ function render(){
   if(s.status === "playing"){
     $("startBtn").classList.add("hidden");
     $("status").textContent = mine
-      ? "🔥 내 차례! 폭탄을 넘겨!"
-      : "상대방이 폭탄을 가지고 있어요.";
+      ? "🔥 내 차례다! 폭탄을 넘겨!"
+      : "상대방이 폭탄을 가지고 있다.";
     startTimer();
     return;
   }
