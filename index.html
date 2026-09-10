@@ -18,13 +18,13 @@ body{
   border-radius:28px; padding:28px; box-shadow:0 20px 60px rgba(0,0,0,.10);
 }
 .bomb{
-  width:190px;height:190px;border-radius:50%;margin:8px auto 22px;
+  width:115px;height:115px;border-radius:50%;margin:8px auto 14px;
   display:flex;align-items:center;justify-content:center;position:relative;
   background:radial-gradient(circle at 35% 30%,#555,#171717 55%,#050505);
   box-shadow:inset -12px -15px 25px #000,0 0 35px #f002;
 }
-.bomb:before{content:"";position:absolute;top:-16px;right:38px;width:30px;height:25px;background:#222;border-radius:8px}
-.bomb:after{content:"";position:absolute;top:-32px;right:51px;width:8px;height:25px;background:#ff8a00;border-radius:8px;box-shadow:0 0 14px #ff5a00}
+.bomb:before{content:"";position:absolute;top:-10px;right:23px;width:18px;height:15px;background:#222;border-radius:8px}
+.bomb:after{content:"";position:absolute;top:-19px;right:31px;width:5px;height:15px;background:#ff8a00;border-radius:8px;box-shadow:0 0 14px #ff5a00}
 .status{font-size:18px;font-weight:700;margin:10px 0 24px}
 button{
   width:100%;border:0;border-radius:16px;padding:16px;font-size:17px;font-weight:800;
@@ -58,7 +58,7 @@ input{
       <input id="roomInput" maxlength="8" placeholder="방 코드">
       <button onclick="joinRoom()">참가</button>
     </div>
-    <div class="info">폭탄 제한시간은 매 판 랜덤으로<br><b>30~40초</b> 또는 <b>1분~1분 10초</b>가 됩니다.</div>
+    <div class="info">폭탄 제한시간은 매 판 랜덤으로<br><b>15~20초</b> 또는 <b>25~30초</b>가 됩니다.<br>넘길 때마다 제한시간이 1초씩 짧아집니다.</div>
   </div>
 
   <div id="game" class="card hidden">
@@ -112,8 +112,8 @@ function getName(){
 
 function randomDuration(){
   return Math.random() < 0.5
-    ? 30000 + Math.floor(Math.random() * 10001)
-    : 60000 + Math.floor(Math.random() * 10001);
+    ? 15000 + Math.floor(Math.random() * 5001)
+    : 25000 + Math.floor(Math.random() * 5001);
 }
 
 function makeRoomCode(){
@@ -405,6 +405,7 @@ window.passBomb = async () => {
 
       current.bombHolder = next.id;
       current.startedAt = Date.now();
+      current.duration = Math.max(5000, Number(current.duration || 0) - 1000);
 
       return current;
     });
