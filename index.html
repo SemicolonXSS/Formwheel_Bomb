@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FormWheel Bomb</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:#f7f7f7; color:#111;
+}
+.app{width:min(460px,94vw); text-align:center}
+.logo{display:block;color:#111;text-decoration:none;font-size:30px;font-weight:900;margin-bottom:18px}
+.card{
+  background:#fff; border:1px solid #e5e5e5;
+  border-radius:28px; padding:28px; box-shadow:0 20px 60px rgba(0,0,0,.10);
+}
+.bomb{
+  width:190px;height:190px;border-radius:50%;margin:8px auto 22px;
+  display:flex;align-items:center;justify-content:center;position:relative;
+  background:radial-gradient(circle at 35% 30%,#555,#171717 55%,#050505);
+  box-shadow:inset -12px -15px 25px #000,0 0 35px #f002;
+}
+.bomb:before{content:"";position:absolute;top:-16px;right:38px;width:30px;height:25px;background:#222;border-radius:8px}
+.bomb:after{content:"";position:absolute;top:-32px;right:51px;width:8px;height:25px;background:#ff8a00;border-radius:8px;box-shadow:0 0 14px #ff5a00}
+.timer{font-size:52px;font-weight:900;letter-spacing:2px}
+.status{font-size:18px;font-weight:700;margin:10px 0 24px}
+button{
+  width:100%;border:0;border-radius:16px;padding:16px;font-size:17px;font-weight:800;
+  cursor:pointer;background:#fff;color:#111;margin-top:10px;
+}
+button.primary{background:#ff3b30;color:white}
+button:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;gap:10px}
+.row button{flex:1}
+input{
+  width:100%;padding:15px;border-radius:14px;border:1px solid #ddd;
+  background:#fff;color:#111;font-size:16px;outline:none;margin:6px 0;
+}
+.info{font-size:13px;color:#777;line-height:1.6;margin-top:18px}
+.hidden{display:none}
+.players{text-align:left;margin:15px 0;padding:0;list-style:none}
+.players li{padding:10px 12px;border-radius:12px;background:#f5f5f5;margin:5px 0}
+.small{font-size:13px;color:#aaa}
+</style>
+</head>
+<body>
+<div class="app">
+  <a class="logo" href="https://semicolonxss.github.io/Formwheel/" aria-label="FormWheel 메인으로 이동">💣 FormWheel Bomb</a>
+
+  <div id="lobby" class="card">
+    <h2>폭탄 돌리기</h2>
+    <p class="small">방을 만들고 친구에게 방 코드를 알려주세요.</p>
+    <input id="name" maxlength="16" placeholder="닉네임">
+    <button class="primary" onclick="createRoom()">방 만들기</button>
+    <div class="row">
+      <input id="roomInput" maxlength="8" placeholder="방 코드">
+      <button onclick="joinRoom()">참가</button>
+    </div>
+    <div class="info">폭탄 제한시간은 매 판 랜덤으로<br><b>30~40초</b> 또는 <b>1분~1분 10초</b>가 됩니다.</div>
+  </div>
+
+  <div id="game" class="card hidden">
+    <div class="small">방 코드: <b id="roomCode"></b></div>
+    <div class="bomb"><div class="timer" id="timer">--</div></div>
+    <div class="status" id="status">게임 준비 중...</div>
+    <button id="passBtn" class="primary" onclick="passBomb()">💣 폭탄 넘기기</button>
+    <ul id="players" class="players"></ul>
+    <div class="info">내 차례일 때만 폭탄을 넘길 수 있어요.<br>시간이 0이 되면 폭탄을 가진 플레이어가 탈락합니다.</div>
+  </div>
+</div>
+
+<script type="module">
+/*
+  Firebase 설정을 본인의 Firebase 프로젝트 설정으로 교체하세요.
+  Firebase Console → 프로젝트 설정 → 내 앱 → 웹 앱에서 확인할 수 있습니다.
+*/
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+import {
+  getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, runTransaction
+} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT.firebasestorage.app",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+let roomId = "";
+let myId = localStorage.getItem("bombPlayerId") || crypto.randomUUID();
+localStorage.setItem("bombPlayerId", myId);
+let unsubscribe = null;
+let lastState = null;
+let timerInterval = null;
+
+const $ = id => document.getElementById(id);
+
+function getName(){
+  const n = $("name").value.trim();
+  if(!n){ alert("닉네임을 입력해주세요."); return null; }
+  return n;
+}
+
+function randomDuration(){
+  // 0 = 30~40초, 1 = 1분~1분10초
+  return Math.random() < .5
+    ? 30000 + Math.floor(Math.random()*10001)
+    : 60000 + Math.floor(Math.random()*10001);
+}
+
+window.createRoom = async () => {
+  const name = getName(); if(!name) return;
+  roomId = Math.random().toString(36).slice(2,8).toUpperCase();
+
+  const player = {id:myId,name,alive:true};
+  const duration = randomDuration();
+
+  await setDoc(doc(db,"bombRooms",roomId),{
+    status:"waiting",
+    players:[player],
+    bombHolder:myId,
+    startedAt:null,
+    duration,
+    winner:null,
+    createdAt:Date.now()
+  });
+
+  enterGame();
+  listenRoom();
+};
+
+window.joinRoom = async () => {
+  const name = getName(); if(!name) return;
+  roomId = $("roomInput").value.trim().toUpperCase();
+  if(!roomId){ alert("방 코드를 입력해주세요."); return; }
+
+  const ref = doc(db,"bombRooms",roomId);
+  const snap = await getDoc(ref);
+  if(!snap.exists()){ alert("방을 찾을 수 없습니다."); return; }
+
+  const data = snap.data();
+  if(data.status !== "waiting"){ alert("이미 시작된 방입니다."); return; }
+  if(data.players.length >= 10){ alert("최대 10명까지 참가할 수 있습니다."); return; }
+
+  const players = [...data.players,{id:myId,name,alive:true}];
+  await updateDoc(ref,{players});
+  enterGame();
+  listenRoom();
+};
+
+function enterGame(){
+  $("lobby").classList.add("hidden");
+  $("game").classList.remove("hidden");
+  $("roomCode").textContent = roomId;
+}
+
+function listenRoom(){
+  if(unsubscribe) unsubscribe();
+  unsubscribe = onSnapshot(doc(db,"bombRooms",roomId), snap=>{
+    if(!snap.exists()) return;
+    lastState = snap.data();
+    render();
+  });
+}
+
+function render(){
+  const s = lastState;
+  $("players").innerHTML = s.players.map(p =>
+    `<li>${p.id===s.bombHolder ? "💣 " : ""}${escapeHtml(p.name)} ${p.id===myId ? "<b>(나)</b>" : ""}${!p.alive ? " 💀" : ""}</li>`
+  ).join("");
+
+  const mine = s.bombHolder === myId && s.status === "playing";
+  $("passBtn").disabled = !mine;
+
+  if(s.status === "waiting"){
+    $("status").textContent = s.players.length < 2
+      ? "친구를 기다리는 중..."
+      : "게임을 시작하려면 호스트가 필요합니다.";
+    $("timer").textContent = "--";
+    return;
+  }
+
+  if(s.status === "playing"){
+    $("status").textContent = mine ? "🔥 내 차례! 폭탄을 넘겨!" : "상대방이 폭탄을 가지고 있어요.";
+    startTimer();
+    return;
+  }
+
+  if(s.status === "finished"){
+    $("status").textContent = s.winner
+      ? `🏆 ${escapeHtml(s.winner)} 승리!`
+      : "게임 종료";
+    $("passBtn").disabled = true;
+    $("timer").textContent = "💥";
+  }
+}
+
+function startTimer(){
+  clearInterval(timerInterval);
+  const update = async () => {
+    if(!lastState || lastState.status!=="playing") return;
+    const left = Math.max(0, lastState.startedAt + lastState.duration - Date.now());
+    $("timer").textContent = Math.ceil(left/1000);
+
+    if(left <= 0){
+      clearInterval(timerInterval);
+      await explode();
+    }
+  };
+  update();
+  timerInterval = setInterval(update,200);
+}
+
+window.passBomb = async () => {
+  const ref = doc(db,"bombRooms",roomId);
+  try{
+    await runTransaction(db, async tx=>{
+      const snap = await tx.get(ref);
+      if(!snap.exists()) throw new Error("방 없음");
+      const s = snap.data();
+      if(s.status!=="playing" || s.bombHolder!==myId) throw new Error("차례 아님");
+
+      const alive = s.players.filter(p=>p.alive);
+      const idx = alive.findIndex(p=>p.id===myId);
+      const next = alive[(idx+1)%alive.length];
+
+      tx.update(ref,{
+        bombHolder:next.id,
+        startedAt:Date.now()
+      });
+    });
+  }catch(e){ console.log(e); }
+};
+
+async function explode(){
+  const ref = doc(db,"bombRooms",roomId);
+  try{
+    await runTransaction(db, async tx=>{
+      const snap = await tx.get(ref);
+      if(!snap.exists()) return;
+      const s = snap.data();
+      if(s.status!=="playing") return;
+
+      const loser = s.players.find(p=>p.id===s.bombHolder);
+      const players = s.players.map(p=>p.id===s.bombHolder ? {...p,alive:false}:p);
+      const alive = players.filter(p=>p.alive);
+
+      tx.update(ref,{
+        players,
+        status: alive.length <= 1 ? "finished" : "playing",
+        winner: alive.length <= 1 ? (alive[0]?.name || "없음") : null,
+        bombHolder: alive.length > 1 ? alive[Math.floor(Math.random()*alive.length)].id : null,
+        startedAt: alive.length > 1 ? Date.now() : null
+      });
+    });
+  }catch(e){ console.log(e); }
+}
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
+}
+
+// 2명 이상이 되면 자동으로 시작
+setInterval(async()=>{
+  if(!roomId || !lastState) return;
+  if(lastState.status==="waiting" && lastState.players.length>=2){
+    const ref=doc(db,"bombRooms",roomId);
+    try{
+      await runTransaction(db,async tx=>{
+        const snap=await tx.get(ref);
+        if(!snap.exists()) return;
+        const s=snap.data();
+        if(s.status!=="waiting" || s.players.length<2) return;
+        tx.update(ref,{status:"playing",startedAt:Date.now(),bombHolder:s.players[0].id});
+      });
+    }catch(e){}
+  }
+},1000);
+</script>
+</body>
+</html>
