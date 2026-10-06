@@ -155,7 +155,7 @@ input:focus{border-color:#ff3b30}
       <input id="roomInput" maxlength="6" placeholder="방 코드" autocomplete="off" autocapitalize="characters">
       <button id="joinBtn">참가</button>
     </div>
-    <div class="info">폭탄 제한시간은 매 판 랜덤으로 <b>10~30초</b>입니다.<br>넘길 때마다 제한시간이 1초씩 짧아집니다. (최소 5초)<br>시간이 몇 초 남았는지는 보이지 않아요!</div>
+    <div class="info">폭탄 제한시간은 매 판 랜덤으로 <b>10~30초</b>입니다.<br>폭탄을 넘겨도 남은 시간은 그대로 이어집니다.<br>시간이 몇 초 남았는지는 보이지 않아요!</div>
   </div>
 
   <div id="game" class="card hidden">
@@ -484,9 +484,8 @@ async function passBomb(){
       const next = alive[(idx + 1) % alive.length];
       const seq = ((cur.event && cur.event.seq) || 0) + 1;
 
+      // startedAt / duration은 건드리지 않음 → 남은 시간이 그대로 이어진다
       cur.bombHolder = next.id;
-      cur.startedAt = now();
-      cur.duration = Math.max(FLOOR_MS, Number(cur.duration || 0) - STEP_MS);
       cur.event = { seq, type: "pass", from: myId, to: next.id };
       return cur;
     });
