@@ -192,7 +192,7 @@ input:focus{border-color:#ff3b30}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
 import {
-  getDatabase, ref, get, set, onValue, runTransaction, remove
+  getDatabase, ref, get, set, onValue, runTransaction, remove, onDisconnect, update
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-database.js";
 
 const firebaseConfig = {
@@ -384,6 +384,8 @@ function enterGame(){
 function listenRoom(){
   if(unsubscribe) unsubscribe();
   lastSeq = null;
+  const presence=ref(db,"bombRooms/"+roomId+"/presence/"+myId);
+  onDisconnect(presence).set(false).then(()=>set(presence,true)).catch(()=>toast("연결 종료 감지 설정 실패"));
 
   unsubscribe = onValue(ref(db, "bombRooms/" + roomId), snap => {
     if(!snap.exists()){
@@ -392,7 +394,23 @@ function listenRoom(){
       location.reload();
       return;
     }
-    lastState = { ...snap.val(), list: sortedPlayers(snap.val().players) };
+    const data=snap.val();
+    if(Object.keys(data.players||{}).some(id=>data.presence?.[id]===false)){
+      runTransaction(ref(db,"bombRooms/"+roomId),cur=>{
+        if(!cur)return;let changed=false;
+        for(const id of Object.keys(cur.players||{}))if(cur.presence?.[id]===false){delete cur.players[id];changed=true;}
+        if(!changed)return;
+        const rest=sortedPlayers(cur.players);if(!rest.length)return null;
+        if(!cur.players[cur.hostId])cur.hostId=rest[0].id;
+        const alive=rest.filter(p=>p.alive);
+        if(cur.status==="playing"){
+          if(alive.length<=1){cur.status="finished";cur.winner=alive[0]?.name||null;cur.winnerId=alive[0]?.id||null;cur.bombHolder=null;cur.endReason="disconnect";}
+          else if(!cur.players[cur.bombHolder])cur.bombHolder=alive[0].id;
+        }
+        return cur;
+      },{applyLocally:false}).catch(()=>toast("퇴장 처리에 실패했습니다. 다시 연결해주세요."));return;
+    }
+    lastState = { ...data, list: sortedPlayers(data.players) };
     render();
   }, error => {
     console.error(error);
@@ -505,7 +523,7 @@ async function explode(){
     await runTransaction(ref(db, "bombRooms/" + roomId), cur => {
       if(!cur || cur.status !== "playing") return;
       // 서버 기준으로 실제로 시간이 지났을 때만 폭발 (중복 폭발 방지)
-      if(now() < cur.startedAt + cur.duration - 250) return;
+      if(now() < cur.startedAt + cur.duration) return;
 
       const holder = cur.bombHolder;
       const players = cur.players || {};
@@ -790,3 +808,4 @@ if(savedRoom) joinRoom(savedRoom);
 </script>
 </body>
 </html>
+
