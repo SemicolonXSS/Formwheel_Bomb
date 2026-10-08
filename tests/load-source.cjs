@@ -1,0 +1,1 @@
+const fs=require('node:fs'),path=require('node:path');module.exports=()=>{const root=path.resolve(__dirname,'..');return fs.readFileSync(path.join(root,'index.html'),'utf8').replace(/<script([^>]*?)src=\"(\.\/[^\"]+)\"([^>]*)><\/script>/g,(_,a,src,b)=>'<script'+a+b+'>'+fs.readFileSync(path.join(root,src),'utf8')+'</script>')};
