@@ -15,14 +15,14 @@ body{
   border-radius:28px; padding:22px; box-shadow:0 20px 60px rgba(0,0,0,.10);
 }
 h2{margin:4px 0 6px}
-.small{font-size:13px;color:#999;margin:0 0 12px}
+.small{font-size:13px;color:#626773;margin:0 0 12px}
 button{
   width:100%;border:0;border-radius:16px;padding:16px;font-size:17px;font-weight:800;
   cursor:pointer;background:#f0f0f0;color:#111;margin-top:10px;font-family:inherit;
   transition:transform .08s, opacity .2s;
 }
 button:active:not(:disabled){transform:scale(.97)}
-button.primary{background:#ff3b30;color:#fff}
+button.primary{background:#cf2017;color:#fff}
 button:disabled{opacity:.4;cursor:not-allowed}
 .row{display:flex;gap:10px}
 .row input{flex:1;min-width:0}
@@ -31,8 +31,8 @@ input{
   width:100%;padding:15px;border-radius:14px;border:1px solid #ddd;
   background:#fff;color:#111;font-size:16px;outline:none;margin:6px 0;font-family:inherit;
 }
-input:focus{border-color:#ff3b30}
-.info{font-size:13px;color:#777;line-height:1.6;margin-top:16px}
+input:focus{border-color:#cf2017}
+.info{font-size:13px;color:#626773;line-height:1.6;margin-top:16px}
 .hidden{display:none!important}
 
 /* 방 코드 */
@@ -40,7 +40,7 @@ input:focus{border-color:#ff3b30}
 .roomcode{
   flex:1;display:flex;align-items:center;justify-content:center;gap:10px;
   background:#f5f5f5;border:1px dashed #ccc;border-radius:14px;padding:10px 12px;
-  font-size:13px;color:#777;cursor:pointer;min-width:0;
+  font-size:13px;color:#626773;cursor:pointer;min-width:0;
 }
 .roomcode b{font-size:24px;letter-spacing:4px;color:#111;font-weight:900}
 .leave{width:auto;margin:0;padding:12px 14px;font-size:14px;border-radius:14px}
@@ -70,15 +70,15 @@ input:focus{border-color:#ff3b30}
 }
 @keyframes boom{
   0%{transform:scale(1);filter:brightness(1)}
-  40%{transform:scale(1.7);filter:brightness(3) saturate(3);background:radial-gradient(circle,#fff,#ffb300 40%,#ff3b30 75%)}
+  40%{transform:scale(1.7);filter:brightness(3) saturate(3);background:radial-gradient(circle,#fff,#ffb300 40%,#cf2017 75%)}
   100%{transform:scale(0);opacity:0}
 }
-.flash{position:absolute;inset:0;border-radius:28px;background:#ff3b30;opacity:0;pointer-events:none}
+.flash{position:absolute;inset:0;border-radius:28px;background:#cf2017;opacity:0;pointer-events:none}
 .flash.on{animation:flashit .5s}
 @keyframes flashit{0%{opacity:.35}100%{opacity:0}}
 
 .status{font-size:18px;font-weight:800;margin:8px 0 14px;min-height:28px;line-height:1.4}
-.status.mine{color:#ff3b30}
+.status.mine{color:#cf2017}
 
 /* 플레이어 목록 */
 .players{text-align:left;margin:16px 0 4px;padding:0;list-style:none}
@@ -87,10 +87,10 @@ input:focus{border-color:#ff3b30}
   background:#f5f5f5;margin:6px 0;font-weight:600;transition:background .25s, transform .25s;
 }
 .players li .bi{font-size:20px;width:26px;text-align:center;visibility:hidden}
-.players li.holder{background:#fff1f0;box-shadow:inset 0 0 0 2px #ff3b30}
+.players li.holder{background:#fff1f0;box-shadow:inset 0 0 0 2px #cf2017}
 .players li.holder .bi{visibility:visible;animation:float 1s ease-in-out infinite}
 .players li .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.players li .tag{font-size:12px;color:#999;font-weight:700}
+.players li .tag{font-size:12px;color:#626773;font-weight:700}
 .players li.dead{opacity:.45;text-decoration:line-through}
 .players li.dead .tag{text-decoration:none}
 .players li.hit{animation:hit .6s}
@@ -124,7 +124,7 @@ input:focus{border-color:#ff3b30}
 .rank li:first-child{background:#fff7d6}
 .rank li .n{width:28px;text-align:center}
 .rank li .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.wait{font-size:14px;color:#888;margin:14px 0 2px}
+.wait{font-size:14px;color:#626773;margin:14px 0 2px}
 
 @media (max-width:380px){
   .logo{font-size:24px}.card{padding:16px;border-radius:22px}
