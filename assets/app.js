@@ -3,6 +3,8 @@ import {
   getDatabase, ref, get, set, onValue, runTransaction, remove, onDisconnect, update
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-database.js";
 
+import {getAuth,signInAnonymously} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+
 const firebaseConfig = {
   apiKey: "AIzaSyBreTSe1m0-xlbF4aupnU5isRZCihR25IE",
   authDomain: "formwheel.firebaseapp.com",
@@ -15,7 +17,8 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+const db = getDatabase(app), auth = getAuth(app);
+const ROOT = "bombRooms/v2/";
 
 const MIN_MS = 10000, MAX_MS = 30000, FLOOR_MS = 5000, STEP_MS = 1000, MAX_PLAYERS = 10;
 
@@ -27,9 +30,11 @@ const store = {
   lget(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
   lset(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 };
-const uid = () => (crypto.randomUUID ? crypto.randomUUID() : "p" + Date.now() + Math.random().toString(36).slice(2));
-let myId = store.get("bombPlayerId") || uid();
-store.set("bombPlayerId", myId);
+let myId = "";
+async function authenticate(){
+ await auth.authStateReady();
+ myId=(auth.currentUser||(await signInAnonymously(auth)).user).uid;
+}
 
 let roomId = "";
 let lastState = null;
@@ -81,7 +86,7 @@ function toast(msg, ms = 2000){
 function buzz(p){ try{ navigator.vibrate && navigator.vibrate(p); }catch(e){} }
 
 function getName(){
-  const n = $("name").value.trim();
+  const n = $("name").value.trim().slice(0,20);
   if(!n){
     alert("닉네임을 입력해주세요.");
     $("name").focus();
@@ -99,29 +104,19 @@ async function createRoom(){
   $("createBtn").disabled = true;
 
   try{
-    let code, roomRef, snap, tries = 0;
-    do{
-      code = makeRoomCode();
-      roomRef = ref(db, "bombRooms/" + code);
-      snap = await get(roomRef);
-      tries++;
-    }while(snap.exists() && tries < 8);
-
-    roomId = code;
-
-    await set(roomRef, {
-      status: "waiting",
-      hostId: myId,
-      players: { [myId]: { id: myId, name, alive: true, joinedAt: now() } },
-      bombHolder: null,
-      startedAt: 0,
-      duration: 0,
-      round: 0,
-      winner: null,
-      winnerId: null,
-      event: null,
-      createdAt: now()
-    });
+    await authenticate();
+    let created="";
+    for(let i=0;i<8;i++){
+      const code=makeRoomCode(),time=now();
+      const tx=await runTransaction(ref(db,ROOT+code),cur=>cur===null?{
+        status:"waiting",hostId:myId,
+        players:{[myId]:{id:myId,name,alive:true,joinedAt:time}},
+        presence:{[myId]:true},startedAt:0,duration:0,round:0,createdAt:time
+      }:undefined,{applyLocally:false});
+      if(tx.committed){created=code;break;}
+    }
+    if(!created)throw Error("방 코드를 만들지 못했습니다.");
+    roomId=created;
 
     enterGame();
     listenRoom();
@@ -144,30 +139,14 @@ async function joinRoom(codeArg){
   }
 
   $("joinBtn").disabled = true;
-  let err = null;
-
   try{
-    const roomRef = ref(db, "bombRooms/" + code);
-    const res = await runTransaction(roomRef, cur => {
-      err = null;
-      if(cur === null) return cur;              // 처음엔 캐시가 비어있을 수 있음 → 서버 값으로 재시도됨
-      const ps = cur.players || {};
-
-      if(ps[myId]){ return cur; }               // 이미 참가한 방: 진행 중이어도 다시 들어올 수 있음
-      if(cur.status !== "waiting"){ err = "started"; return; }
-      if(Object.keys(ps).length >= MAX_PLAYERS){ err = "full"; return; }
-
-      ps[myId] = { id: myId, name, alive: true, joinedAt: now() };
-      cur.players = ps;
-      return cur;
-    });
-
-    if(err === "started"){ alert("이미 시작된 방입니다."); return; }
-    if(err === "full"){ alert("최대 10명까지 참가할 수 있습니다."); return; }
-    if(!res.snapshot.exists()){
-      if(codeArg) store.del("bombRoom");
-      else alert("방을 찾을 수 없습니다.");
-      return;
+    await authenticate();
+    if(!/^[A-HJ-NP-Z2-9]{6}$/.test(code))throw Error("6자리 방 코드를 입력해 주세요.");
+    const target=ref(db,ROOT+code),current=(await get(target)).val();
+    if(!current){if(codeArg)store.del("bombRoom");else alert("방을 찾을 수 없습니다.");return;}
+    if(!current.players?.[myId]){
+      if(current.status!=="waiting"||Object.keys(current.players||{}).length>=MAX_PLAYERS)throw Error("이미 시작했거나 방이 가득 찼습니다.");
+      await update(target,{["players/"+myId]:{id:myId,name,alive:true,joinedAt:now()},["presence/"+myId]:true});
     }
 
     roomId = code;
@@ -189,35 +168,32 @@ function enterGame(){
   window.scrollTo(0, 0);
 }
 
+async function armPresence(code){
+  if(!code||!myId)return;
+  const target=ref(db,ROOT+code+"/presence/"+myId);
+  await onDisconnect(target).set(false);
+  if(roomId===code)await set(target,true);
+}
+onValue(ref(db,".info/connected"),snap=>{
+  if(snap.val()&&roomId)armPresence(roomId).catch(console.warn);
+});
 function listenRoom(){
-  if(unsubscribe) unsubscribe();
-  lastSeq = null;
-  const presence=ref(db,"bombRooms/"+roomId+"/presence/"+myId);
-  onDisconnect(presence).set(false).then(()=>set(presence,true)).catch(()=>toast("연결 종료 감지 설정 실패"));
-
-  unsubscribe = onValue(ref(db, "bombRooms/" + roomId), snap => {
-    if(!snap.exists()){
-      store.del("bombRoom");
-      alert("방이 삭제되었습니다.");
-      location.reload();
-      return;
-    }
+  if(unsubscribe)unsubscribe();
+  lastSeq=null;
+  const code=roomId;
+  armPresence(code).catch(()=>toast("연결 종료 감지 설정 실패"));
+  unsubscribe=onValue(ref(db,ROOT+code),snap=>{
     const data=snap.val();
-    if(Object.keys(data.players||{}).some(id=>data.presence?.[id]===false)){
-      runTransaction(ref(db,"bombRooms/"+roomId),cur=>{
-        if(!cur)return;let changed=false;
-        for(const id of Object.keys(cur.players||{}))if(cur.presence?.[id]===false){delete cur.players[id];changed=true;}
-        if(!changed)return;
-        const rest=sortedPlayers(cur.players);if(!rest.length)return null;
-        if(!cur.players[cur.hostId])cur.hostId=rest[0].id;
-        const alive=rest.filter(p=>p.alive);
-        if(cur.status==="playing"){
-          if(alive.length<=1){cur.status="finished";cur.winner=alive[0]?.name||null;cur.winnerId=alive[0]?.id||null;cur.bombHolder=null;cur.endReason="disconnect";}
-          else if(!cur.players[cur.bombHolder])cur.bombHolder=alive[0].id;
-        }
-        return cur;
-      },{applyLocally:false}).catch(()=>toast("퇴장 처리에 실패했습니다. 다시 연결해주세요."));return;
+    if(!data?.players?.[myId]){
+      store.del("bombRoom");
+      alert("방이 종료되었거나 참가 상태가 해제됐어요.");
+      location.reload();return;
     }
+    if(data.presence?.[data.hostId]===false){
+      const first=sortedPlayers(data.players).find(p=>data.presence?.[p.id]===true);
+      if(first?.id===myId)set(ref(db,ROOT+code+"/hostId"),myId).catch(console.warn);
+    }
+    if(data.hostId===myId&&data.passRequest)settlePass(code,data.passRequest).catch(console.warn);
     lastState = { ...data, list: sortedPlayers(data.players) };
     render();
   }, error => {
@@ -229,25 +205,28 @@ function listenRoom(){
 /* ---------- 나가기 ---------- */
 async function leaveRoom(){
   const code = roomId;
-  const s = lastState;
-  store.del("bombRoom");
-  if(unsubscribe) unsubscribe();
-
   try{
-    if(code && s && s.status === "waiting"){
-      // 대기 중에만 방에서 완전히 제거. 진행 중에는 다시 들어올 수 있게 둔다.
-      await runTransaction(ref(db, "bombRooms/" + code), cur => {
-        if(!cur) return cur;
-        const ps = cur.players || {};
-        delete ps[myId];
-        const rest = sortedPlayers(ps);
-        if(rest.length === 0) return null;      // 마지막 사람이 나가면 방 삭제
-        if(cur.hostId === myId) cur.hostId = rest[0].id;
-        cur.players = ps;
-        return cur;
-      });
+    if(code){
+      const target=ref(db,ROOT+code),current=(await get(target)).val();
+      if(current?.hostId===myId&&current.status==="waiting"){
+        await runTransaction(target,cur=>{
+          if(!cur||cur.hostId!==myId||cur.status!=="waiting")return;
+          delete cur.players[myId];delete cur.presence?.[myId];
+          const rest=sortedPlayers(cur.players);
+          if(!rest.length)return null;
+          cur.hostId=rest.find(p=>cur.presence?.[p.id]===true)?.id||rest[0].id;
+          return cur;
+        },{applyLocally:false});
+      }else if(current?.players?.[myId]){
+        const changes={["presence/"+myId]:false};
+        if(current.status==="waiting")Object.assign(changes,{["presence/"+myId]:null,["players/"+myId]:null});
+        await update(target,changes);
+      }
+      await onDisconnect(ref(db,ROOT+code+"/presence/"+myId)).cancel().catch(()=>{});
     }
-  }catch(e){ console.error(e); }
+  }catch(e){toast("퇴장 실패: "+e.message);return;}
+  store.del("bombRoom");
+  unsubscribe?.();
 
   location.reload();
 }
@@ -258,13 +237,13 @@ async function startGame(){
   let err = null;
 
   try{
-    await runTransaction(ref(db, "bombRooms/" + roomId), cur => {
+    await runTransaction(ref(db, ROOT + roomId), cur => {
       err = null;
       if(!cur) return cur;
       if(cur.hostId !== myId){ err = "host"; return; }
       if(cur.status !== "waiting"){ return; }
 
-      const alive = sortedPlayers(cur.players).filter(p => p.alive);
+      const alive = sortedPlayers(cur.players).filter(p => p.alive&&cur.presence?.[p.id]===true);
       if(alive.length < 2){ err = "min"; return; }
 
       const first = alive[Math.floor(Math.random() * alive.length)];
@@ -291,36 +270,23 @@ async function startGame(){
 
 /* ---------- 폭탄 넘기기 ---------- */
 async function passBomb(){
-  if(!roomId || passing) return;
-  passing = true;
-  $("passBtn").disabled = true;
-
-  try{
-    await runTransaction(ref(db, "bombRooms/" + roomId), cur => {
-      if(!cur) return cur;
-      if(cur.status !== "playing") return;
-      if(cur.bombHolder !== myId) return;
-      // 이미 시간이 다 됐다면 넘길 수 없음 (폭발 처리가 우선)
-      if(now() >= cur.startedAt + cur.duration) return;
-
-      const alive = sortedPlayers(cur.players).filter(p => p.alive);
-      if(alive.length <= 1) return;
-
-      const idx = alive.findIndex(p => p.id === myId);
-      const next = alive[(idx + 1) % alive.length];
-      const seq = ((cur.event && cur.event.seq) || 0) + 1;
-
-      // startedAt / duration은 건드리지 않음 → 남은 시간이 그대로 이어진다
-      cur.bombHolder = next.id;
-      cur.event = { seq, type: "pass", from: myId, to: next.id };
-      return cur;
-    });
-  }catch(e){
-    console.error(e);
-  }finally{
-    passing = false;
-    render();
-  }
+ if(!roomId||passing||lastState?.bombHolder!==myId)return;
+ passing=true;
+ try{
+  await set(ref(db,ROOT+roomId+"/passRequest"),{uid:myId,seq:lastState.event.seq});
+ }catch(e){toast("폭탄 전달 실패: "+e.message);}
+ finally{passing=false;render();}
+}
+async function settlePass(code,request){
+ await runTransaction(ref(db,ROOT+code),cur=>{
+  if(!cur||cur.hostId!==myId||cur.passRequest?.seq!==request.seq||cur.passRequest?.uid!==request.uid)return;
+  const next={...cur,passRequest:null};
+  if(cur.status!=="playing"||cur.bombHolder!==request.uid||cur.event?.seq!==request.seq||now()>=cur.startedAt+cur.duration)return next;
+  const alive=sortedPlayers(cur.players).filter(p=>p.alive&&(p.id===request.uid||cur.presence?.[p.id]!==false));
+  if(alive.length<2)return next;
+  const index=alive.findIndex(p=>p.id===request.uid),to=alive[(index+1)%alive.length].id;
+  return {...next,bombHolder:to,event:{seq:request.seq+1,type:"pass",from:request.uid,to}};
+ },{applyLocally:false});
 }
 
 /* ---------- 폭발 / 탈락 ---------- */
@@ -328,8 +294,8 @@ async function explode(){
   if(!roomId) return;
 
   try{
-    await runTransaction(ref(db, "bombRooms/" + roomId), cur => {
-      if(!cur || cur.status !== "playing") return;
+    await runTransaction(ref(db, ROOT + roomId), cur => {
+      if(!cur || cur.hostId!==myId || cur.status !== "playing") return;
       // 서버 기준으로 실제로 시간이 지났을 때만 폭발 (중복 폭발 방지)
       if(now() < cur.startedAt + cur.duration) return;
 
@@ -372,7 +338,7 @@ async function explode(){
 async function restartGame(){
   if(!roomId) return;
   try{
-    await runTransaction(ref(db, "bombRooms/" + roomId), cur => {
+    await runTransaction(ref(db, ROOT + roomId), cur => {
       if(!cur) return cur;
       if(cur.hostId !== myId) return;
       if(cur.status !== "finished") return;
@@ -577,7 +543,7 @@ setInterval(() => {
     bomb.classList.toggle("idle", !tense);
   }
 
-  if(left <= 0 && !exploding){
+  if(left <= 0 && !exploding && s.hostId===myId){
     // 폭탄 주인이 먼저 처리하고, 연결이 끊긴 경우에 대비해 다른 사람은 1.5초 뒤 대신 처리
     const wait = s.bombHolder === myId ? 0 : 1500;
     if(left <= -wait){
